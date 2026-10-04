@@ -1,0 +1,77 @@
+import {readdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs'
+const CATS=['Economy','Utility','Management','Library','Optimization','Technology','Social','Storage']
+const EXT=/\.(jar|zip|mrpack)$/i
+const slug=(s)=>String(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+const rel=(p)=>typeof p==='string'&&/^[\w.-]+(\/[\w.-]+)*$/.test(p)&&!p.split('/').some(s=>s==='.'||s==='..')
+const tok=(v)=>String(v).split(/[.-]/).map(x=>/^\d+$/.test(x)?+x:x)
+const cmp=(a,b)=>{
+const x=tok(a),y=tok(b)
+for(let i=0;i<Math.max(x.length,y.length);i++){
+const p=x[i],q=y[i]
+if(p===q)continue
+if(p===undefined)return typeof q==='string'?1:-1
+if(q===undefined)return typeof p==='string'?-1:1
+if(typeof p==='number'&&typeof q==='number')return p-q
+if(typeof p==='number')return 1
+if(typeof q==='number')return -1
+return p<q?-1:1
+}
+return 0
+}
+const parse=(file)=>{
+const base=file.replace(EXT,'')
+const m=base.match(/^(.*?)[-_ ]v?(\d+(?:\.\d+)*(?:[-+][\w.]+)?)$/)
+return m&&m[1]?{raw:m[1],ver:m[2].slice(0,40)}:{raw:base,ver:'1.0.0'}
+}
+const pretty=(s)=>s.split(/[-_\s]+/).filter(Boolean).map(w=>w[0].toUpperCase()+w.slice(1)).join(' ').slice(0,60)
+const esc=(s)=>s.replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';')
+const letter=(n)=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0A0A0C"/><text x="32" y="43" font-size="32" font-family="sans-serif" font-weight="700" text-anchor="middle" fill="#B8BCC4">${esc([...n][0].toUpperCase())}</text></svg>`
+const dump=(l)=>'[\n'+l.map(x=>JSON.stringify(x)).join(',\n')+'\n]\n'
+const sync=(kind,dir)=>{
+const mf=`${dir}/${dir}.json`
+let old=[]
+try{const j=JSON.parse(readFileSync(mf,'utf8'));if(Array.isArray(j))old=j}catch{}
+const found=new Map()
+for(const c of CATS){
+const cd=slug(c)
+if(!existsSync(`${dir}/${cd}`))continue
+for(const f of readdirSync(`${dir}/${cd}`).sort()){
+if(!EXT.test(f))continue
+const p=parse(f),id=slug(p.raw)
+if(!id)continue
+const cur=found.get(id)
+if(!cur||cmp(p.ver,cur.ver)>0)found.set(id,{id,raw:p.raw,ver:p.ver,cat:c,file:`${cd}/${f}`})
+}
+}
+const out=[],files=new Set(),ids=new Set()
+let added=0,updated=0,removed=0
+for(const e of old){
+if(!e||typeof e!=='object'||typeof e.name!=='string'){removed++;continue}
+const id=slug(e.id||e.name),cand=found.get(id)
+const here=rel(e.file)&&existsSync(`${dir}/${e.file}`)
+let next=null
+if(here){
+next=e
+if(cand&&cand.file!==e.file&&cmp(cand.ver,parse(e.file.split('/').pop()).ver)>0)next={...e,version:cand.ver,file:cand.file,category:cand.cat}
+}else if(cand)next={...e,version:cand.ver,file:cand.file,category:cand.cat}
+if(!next){removed++;continue}
+if(files.has(next.file)){removed++;continue}
+if(next!==e)updated++
+out.push(next)
+files.add(next.file)
+ids.add(id)
+}
+const fresh=[...found.values()].filter(c=>!files.has(c.file)&&!ids.has(c.id)).sort((a,b)=>a.id<b.id?-1:1)
+for(const c of fresh){
+const name=pretty(c.raw)||c.id
+out.push({id:c.id,name,description:'',category:c.cat,...(kind==='mod'?{type:'Client-Sided'}:{}),version:c.ver,icon:`${c.id}.svg`,file:c.file})
+added++
+}
+for(const e of out)if(rel(e.icon)&&e.icon.endsWith('.svg')&&!existsSync(`${dir}/icons/${e.icon}`))writeFileSync(`${dir}/icons/${e.icon}`,letter(e.name))
+const text=dump(out)
+const prev=existsSync(mf)?readFileSync(mf,'utf8'):''
+if(text!==prev)writeFileSync(mf,text)
+console.log(`${dir}: ${out.length} listed, ${added} added, ${updated} updated, ${removed} removed`)
+}
+sync('plugin','plugins')
+sync('mod','mods')
