@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>DBPlugin Library</title>
+<script>
+const r=['plugins','mods','login','register','account'],p=location.pathname.split('/')
+let i=p.findIndex((s,k)=>k>0&&r.includes(s))
+if(i<0)i=p.length-1
+sessionStorage.setItem('dbp:redirect',location.pathname+location.search+location.hash)
+location.replace(p.slice(0,i).join('/')+'/')
+</script>
